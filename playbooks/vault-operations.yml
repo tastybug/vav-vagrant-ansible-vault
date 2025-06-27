@@ -1,0 +1,84 @@
+---
+- name: Vault Operations (start/stop/restart/reset)
+  hosts: vault_cluster
+  become: yes
+  vars:
+    vault_user: vault
+    vault_group: vault
+    operation: "{{ vault_operation | default('status') }}"
+    
+  tasks:
+    - name: Display operation
+      debug:
+        msg: "Performing operation: {{ operation }}"
+
+    - name: Stop Vault service
+      systemd:
+        name: vault
+        state: stopped
+      when: operation in ['stop', 'restart', 'reset']
+
+    - name: Start Vault service
+      systemd:
+        name: vault
+        state: started
+      when: operation in ['start', 'restart']
+
+    - name: Show Vault service status
+      systemd:
+        name: vault
+      register: vault_service_status
+      when: operation == 'status'
+
+    - name: Display service status
+      debug:
+        msg: |
+          Service: {{ vault_service_status.name }}
+          State: {{ vault_service_status.status.ActiveState }}
+          Enabled: {{ vault_service_status.status.UnitFileState }}
+      when: operation == 'status'
+
+    - name: Reset Vault cluster - Remove data directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ vault_data_dir }}"
+        - "{{ vault_config_dir }}/unseal.key"
+        - "{{ vault_config_dir }}/root.token"
+      when: operation == 'reset'
+
+    - name: Reset Vault cluster - Recreate data directory
+      file:
+        path: "{{ vault_data_dir }}"
+        state: directory
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0755'
+      when: operation == 'reset'
+
+    - name: Start Vault service after reset
+      systemd:
+        name: vault
+        state: started
+      when: operation == 'reset'
+
+    - name: Wait for Vault to be ready after reset
+      uri:
+        url: "{{ vault_api_addr }}/v1/sys/health"
+        method: GET
+        validate_certs: no
+        status_code: [200, 429, 472, 473, 501, 503]
+      register: vault_health_check
+      until: vault_health_check.status in [200, 429, 472, 473, 501, 503]
+      retries: 30
+      delay: 5
+      when: operation == 'reset'
+
+    - name: Display reset completion message
+      debug:
+        msg: |
+          Vault cluster has been reset successfully!
+          All data has been cleared and services are running.
+          You can now re-run the deployment playbook to initialize a fresh cluster.
+      when: operation == 'reset'

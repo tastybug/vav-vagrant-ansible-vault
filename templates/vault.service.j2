@@ -1,0 +1,37 @@
+[Unit]
+Description=HashiCorp Vault HA Cluster - {{ vault_node_id }}
+Documentation=https://www.vaultproject.io/docs/
+Requires=network-online.target
+After=network-online.target
+ConditionFileNotEmpty={{ vault_config_dir }}/vault.hcl
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=notify
+User=vault
+Group=vault
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+SecureBits=keep-caps
+AmbientCapabilities=CAP_IPC_LOCK
+CapabilityBoundingSet=CAP_SYSLOG CAP_IPC_LOCK
+NoNewPrivileges=yes
+ExecStart=/usr/local/bin/podman-compose -f {{ vault_compose_dir }}/podman-compose.yml up
+ExecStartPost=/bin/sleep 10
+ExecStartPost={{ vault_config_dir }}/vault-unseal.sh
+ExecStop=/usr/local/bin/podman-compose -f {{ vault_compose_dir }}/podman-compose.yml down
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=process
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+LimitNOFILE=65536
+LimitMEMLOCK=infinity
+WorkingDirectory={{ vault_compose_dir }}
+
+[Install]
+WantedBy=multi-user.target

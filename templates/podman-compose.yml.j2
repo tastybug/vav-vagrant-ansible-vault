@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  vault:
+    image: hashicorp/vault:{{ vault_version }}
+    container_name: vault-{{ vault_node_id }}
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    environment:
+      - VAULT_ADDR=https://127.0.0.1:8200
+      - VAULT_API_ADDR={{ vault_api_addr }}
+      - VAULT_CLUSTER_ADDR={{ vault_cluster_addr }}
+    volumes:
+      - {{ vault_config_dir }}:/vault/config:Z
+      - {{ vault_data_dir }}:/vault/data:Z
+      - {{ vault_logs_dir }}:/vault/logs:Z
+      - {{ vault_tls_dir }}:/vault/tls:Z
+    ports:
+      - "8200:8200"
+      - "8201:8201"
+    command: ["vault", "server", "-config=/vault/config/vault.hcl"]
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - vault-network
+
+networks:
+  vault-network:
+    driver: bridge

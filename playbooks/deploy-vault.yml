@@ -1,0 +1,289 @@
+---
+- name: Deploy HashiCorp Vault HA Cluster
+  hosts: vault_cluster
+  become: yes
+  vars:
+    vault_user: vault
+    vault_group: vault
+    vault_log_unseal_key: false
+    
+  tasks:
+    - name: Create vault user
+      user:
+        name: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        system: yes
+        home: /opt/vault
+        shell: /bin/bash
+        create_home: yes
+
+    - name: Install required packages
+      dnf:
+        name:
+          - podman
+          - podman-compose
+          - python3-pip
+          - openssl
+        state: present
+
+    - name: Install Python OpenSSL module
+      pip:
+        name: pyOpenSSL
+        state: present
+
+    - name: Create vault directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0755'
+      loop:
+        - "{{ vault_data_dir }}"
+        - "{{ vault_config_dir }}"
+        - "{{ vault_logs_dir }}"
+        - "{{ vault_tls_dir }}"
+        - "{{ vault_compose_dir }}"
+
+    - name: Generate CA private key
+      openssl_privatekey:
+        path: "{{ vault_tls_dir }}/ca.key"
+        size: 4096
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0600'
+      run_once: true
+      delegate_to: vault1
+
+    - name: Generate CA certificate
+      openssl_certificate:
+        path: "{{ vault_tls_dir }}/ca.crt"
+        privatekey_path: "{{ vault_tls_dir }}/ca.key"
+        provider: selfsigned
+        common_name: "Vault CA"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0644'
+      run_once: true
+      delegate_to: vault1
+
+    - name: Fetch CA certificate from vault1
+      fetch:
+        src: "{{ vault_tls_dir }}/ca.crt"
+        dest: /tmp/ca.crt
+        flat: yes
+      when: inventory_hostname == 'vault1'
+      run_once: true
+
+    - name: Copy CA certificate to all nodes
+      copy:
+        src: /tmp/ca.crt
+        dest: "{{ vault_tls_dir }}/ca.crt"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0644'
+      when: inventory_hostname != 'vault1'
+
+    - name: Generate vault private key
+      openssl_privatekey:
+        path: "{{ vault_tls_dir }}/vault.key"
+        size: 4096
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0600'
+
+    - name: Generate vault certificate signing request
+      openssl_csr:
+        path: "{{ vault_tls_dir }}/vault.csr"
+        privatekey_path: "{{ vault_tls_dir }}/vault.key"
+        common_name: "{{ inventory_hostname }}"
+        subject_alt_name:
+          - "DNS:{{ inventory_hostname }}"
+          - "DNS:localhost"
+          - "IP:127.0.0.1"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+
+    - name: Copy CA key to all nodes for certificate signing
+      copy:
+        src: "{{ vault_tls_dir }}/ca.key"
+        dest: "{{ vault_tls_dir }}/ca.key"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0600'
+      when: inventory_hostname != 'vault1'
+
+    - name: Generate vault certificate
+      openssl_certificate:
+        path: "{{ vault_tls_dir }}/vault.crt"
+        csr_path: "{{ vault_tls_dir }}/vault.csr"
+        ownca_path: "{{ vault_tls_dir }}/ca.crt"
+        ownca_privatekey_path: "{{ vault_tls_dir }}/ca.key"
+        provider: ownca
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0644'
+
+    - name: Deploy vault configuration
+      template:
+        src: vault.hcl.j2
+        dest: "{{ vault_config_dir }}/vault.hcl"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0644'
+      notify: restart vault
+
+    - name: Deploy podman-compose configuration
+      template:
+        src: podman-compose.yml.j2
+        dest: "{{ vault_compose_dir }}/podman-compose.yml"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0644'
+      notify: restart vault
+
+    - name: Deploy vault unseal script
+      template:
+        src: vault-unseal.sh.j2
+        dest: "{{ vault_config_dir }}/vault-unseal.sh"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0755'
+
+    - name: Deploy systemd service file
+      template:
+        src: vault.service.j2
+        dest: /etc/systemd/system/vault.service
+        mode: '0644'
+      notify:
+        - reload systemd
+        - restart vault
+
+    - name: Enable vault service
+      systemd:
+        name: vault
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Start vault service
+      systemd:
+        name: vault
+        state: started
+
+    - name: Wait for Vault to be ready
+      uri:
+        url: "{{ vault_api_addr }}/v1/sys/health"
+        method: GET
+        validate_certs: no
+        status_code: [200, 429, 472, 473, 501, 503]
+      register: vault_health_check
+      until: vault_health_check.status in [200, 429, 472, 473, 501, 503]
+      retries: 30
+      delay: 5
+
+    - name: Check if unseal key already exists
+      stat:
+        path: "{{ vault_config_dir }}/unseal.key"
+      register: unseal_key_exists
+
+    - name: Check if Vault is initialized
+      uri:
+        url: "{{ vault_api_addr }}/v1/sys/init"
+        method: GET
+        validate_certs: no
+      register: vault_init_status
+      failed_when: false
+
+    - name: Initialize Vault (first node only, if not already initialized)
+      uri:
+        url: "{{ vault_api_addr }}/v1/sys/init"
+        method: POST
+        body_format: json
+        validate_certs: no
+        body:
+          secret_shares: 1
+          secret_threshold: 1
+      register: vault_init_result
+      when: 
+        - vault_init_status.status == 200
+        - not vault_init_status.json.initialized
+        - inventory_hostname == groups['vault_cluster'][0]
+        - not unseal_key_exists.stat.exists
+
+    - name: Save unseal key to file (first node only)
+      copy:
+        content: "{{ vault_init_result.json.keys[0] }}"
+        dest: "{{ vault_config_dir }}/unseal.key"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0600'
+      when: 
+        - vault_init_result is defined
+        - vault_init_result.json is defined
+        - inventory_hostname == groups['vault_cluster'][0]
+
+    - name: Save root token to file (first node only)
+      copy:
+        content: "{{ vault_init_result.json.root_token }}"
+        dest: "{{ vault_config_dir }}/root.token"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0600'
+      when: 
+        - vault_init_result is defined
+        - vault_init_result.json is defined
+        - inventory_hostname == groups['vault_cluster'][0]
+
+    - name: Log unseal key (if enabled)
+      debug:
+        msg: "Vault unseal key: {{ vault_init_result.json.keys[0] }}"
+      when: 
+        - vault_log_unseal_key | bool
+        - vault_init_result is defined
+        - vault_init_result.json is defined
+        - inventory_hostname == groups['vault_cluster'][0]
+
+    - name: Check if unseal key exists on first node
+      stat:
+        path: "{{ vault_config_dir }}/unseal.key"
+      register: first_node_unseal_key
+      when: inventory_hostname == groups['vault_cluster'][0]
+
+    - name: Fetch unseal key from first node (if exists)
+      fetch:
+        src: "{{ vault_config_dir }}/unseal.key"
+        dest: /tmp/unseal.key
+        flat: yes
+      when: 
+        - inventory_hostname == groups['vault_cluster'][0]
+        - first_node_unseal_key.stat.exists
+
+    - name: Copy unseal key to other nodes
+      copy:
+        src: /tmp/unseal.key
+        dest: "{{ vault_config_dir }}/unseal.key"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: '0600'
+      when: 
+        - inventory_hostname != groups['vault_cluster'][0]
+        - hostvars[groups['vault_cluster'][0]]['first_node_unseal_key']['stat']['exists'] | default(false)
+
+    - name: Unseal Vault on all nodes (if unseal key exists)
+      shell: "{{ vault_config_dir }}/vault-unseal.sh"
+      become_user: "{{ vault_user }}"
+      environment:
+        VAULT_ADDR: "{{ vault_api_addr }}"
+        VAULT_CACERT: "{{ vault_tls_dir }}/ca.crt"
+      when: unseal_key_exists.stat.exists or (vault_init_result is defined and vault_init_result.json is defined)
+      failed_when: false
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: restart vault
+      systemd:
+        name: vault
+        state: restarted

@@ -1,0 +1,49 @@
+#!/bin/bash
+
+VAULT_ADDR="{{ vault_api_addr }}"
+UNSEAL_KEY_FILE="{{ vault_config_dir }}/unseal.key"
+VAULT_TOKEN_FILE="{{ vault_config_dir }}/root.token"
+
+export VAULT_ADDR
+export VAULT_CACERT="{{ vault_tls_dir }}/ca.crt"
+
+wait_for_vault() {
+    echo "Waiting for Vault to start..."
+    for i in {1..30}; do
+        if vault status >/dev/null 2>&1; then
+            echo "Vault is running"
+            return 0
+        fi
+        echo "Attempt $i: Vault not ready, waiting..."
+        sleep 5
+    done
+    echo "Vault failed to start within timeout"
+    return 1
+}
+
+if ! wait_for_vault; then
+    exit 1
+fi
+
+if vault status | grep -q "Sealed.*true"; then
+    echo "Vault is sealed, attempting to unseal..."
+    
+    if [[ -f "$UNSEAL_KEY_FILE" ]]; then
+        echo "Using existing unseal key"
+        UNSEAL_KEY=$(cat "$UNSEAL_KEY_FILE")
+        vault operator unseal "$UNSEAL_KEY"
+        
+        if [[ $? -eq 0 ]]; then
+            echo "Vault successfully unsealed"
+        else
+            echo "Failed to unseal Vault"
+            exit 1
+        fi
+    else
+        echo "Unseal key file not found: $UNSEAL_KEY_FILE"
+        echo "Vault needs to be initialized first"
+        exit 1
+    fi
+else
+    echo "Vault is already unsealed"
+fi
