@@ -64,9 +64,9 @@ Vagrant.configure("2") do |config|
       # Add entries to /etc/hosts for all vault nodes
       node.vm.provision "shell", inline: <<-SHELL
         # Add all vault nodes to /etc/hosts
-        echo "192.168.56.11 vault1" >> /etc/hosts
-        echo "192.168.56.12 vault2" >> /etc/hosts
-        echo "192.168.56.13 vault3" >> /etc/hosts
+        echo "192.168.60.21 vault1" >> /etc/hosts
+        echo "192.168.60.22 vault2" >> /etc/hosts
+        echo "192.168.60.23 vault3" >> /etc/hosts
         
         # Ensure proper hostname resolution
         hostnamectl set-hostname vault#{i}
