@@ -48,7 +48,7 @@ Vagrant.configure("2") do |config|
   (1..3).each do |i|
     config.vm.define "vault#{i}" do |node|
       node.vm.hostname = "vault#{i}"
-      node.vm.network "private_network", ip: "192.168.56.#{10 + i}"
+      node.vm.network "private_network", ip: "192.168.60.#{20 + i}"
       
       # Port forwarding for Vault UI (only for vault1)
       if i == 1
