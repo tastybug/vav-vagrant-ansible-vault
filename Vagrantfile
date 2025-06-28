@@ -4,44 +4,43 @@
 Vagrant.configure("2") do |config|
   # Base box configuration
   config.vm.box = "rockylinux/9"
-  config.vm.box_version = ">= 4.0.0"
+  config.vm.box_version = "4.0.0"
 
   # SSH configuration
   config.ssh.insert_key = false
-  config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/id_rsa"]
-  config.vm.provision "file", source: "~/.ssh/id_rsa.pub", destination: "~/.ssh/authorized_keys"
+  config.ssh.private_key_path = ["~/.vagrant.d/insecure_private_key", "~/.ssh/ansible"]
+  config.vm.provision "file", source: "~/.ssh/ansible.pub", destination: "~/.ssh/authorized_keys"
 
   # Global VM settings
   config.vm.provider "virtualbox" do |vb|
     vb.memory = 2048
-    vb.cpus = 2
-    vb.linked_clone = true
+    vb.cpus = 1
   end
 
   # Common provisioning script
   config.vm.provision "shell", inline: <<-SHELL
+	sudo systemctl start firewalld
     # Update system
-    dnf update -y
+    #sudo dnf update -y
     
     # Install required packages
-    dnf install -y podman podman-compose python3-pip git wget curl
+    sudo dnf install -y podman systemd dbus python3-pip git wget curl
     
-    # Enable podman socket for rootless containers
-    systemctl --user enable podman.socket --now || true
-    loginctl enable-linger vagrant
+    sudo loginctl enable-linger vagrant
     
     # Configure firewall for Vault ports
-    firewall-cmd --permanent --add-port=8200/tcp
-    firewall-cmd --permanent --add-port=8201/tcp
-    firewall-cmd --reload
+	sudo systemctl start firewalld
+    sudo firewall-cmd --permanent --add-port=8200/tcp
+    sudo firewall-cmd --permanent --add-port=8201/tcp
+    sudo firewall-cmd --reload
     
     # Ensure SSH is properly configured
-    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-    systemctl restart sshd
+    sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    sudo systemctl restart sshd
     
     # Set up podman for the vagrant user
     sudo -u vagrant podman system migrate || true
-    sudo -u vagrant systemctl --user enable podman.socket --now || true
+	podman run hello-world
   SHELL
 
   # Define the three Vault nodes
@@ -69,7 +68,7 @@ Vagrant.configure("2") do |config|
         echo "192.168.60.23 vault3" >> /etc/hosts
         
         # Ensure proper hostname resolution
-        hostnamectl set-hostname vault#{i}
+        sudo hostnamectl set-hostname vault#{i}
       SHELL
     end
   end
