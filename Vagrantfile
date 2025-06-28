@@ -19,6 +19,7 @@ Vagrant.configure("2") do |config|
 
   # Common provisioning script
   config.vm.provision "shell", inline: <<-SHELL
+	set -e
 	sudo systemctl start firewalld
     # Update system
     #sudo dnf update -y
