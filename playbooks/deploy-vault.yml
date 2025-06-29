@@ -8,11 +8,15 @@
     vault_log_unseal_key: false
     
   tasks:
+    - name: Create group
+      group:
+        name: "{{ vault_group }}"
+        state: present
+
     - name: Create vault user
       user:
         name: "{{ vault_user }}"
         group: "{{ vault_group }}"
-        create_group: true
         system: true
         home: /opt/vault
         shell: /bin/bash
@@ -56,14 +60,23 @@
       delegate_to: vault1
 
     - name: Generate CA certificate
-      openssl_certificate:
+      community.crypto.openssl_csr:
         path: "{{ vault_tls_dir }}/ca.crt"
         privatekey_path: "{{ vault_tls_dir }}/ca.key"
-        provider: selfsigned
-        common_name: "Vault CA"
-        owner: "{{ vault_user }}"
-        group: "{{ vault_group }}"
+        common_name: "MyCA"
+        organization_name: "My Organization"
+        organizational_unit_name: "Certificate Authority"
+        country_name: "US"
+        basic_constraints:
+          - "CA:TRUE"
+          - "pathlen:0"  # Optional: Limits to no intermediate CAs
+        basic_constraints_critical: true
+        key_usage:
+          - "keyCertSign"
+          - "cRLSign"
+        key_usage_critical: true
         mode: '0644'
+        state: present
       run_once: true
       delegate_to: vault1
 
