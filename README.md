@@ -45,9 +45,9 @@ vagrant ssh vault3
 ```
 
 The VMs will be available at:
-- vault1: 192.168.56.11
-- vault2: 192.168.56.12
-- vault3: 192.168.56.13
+- vault1: 192.168.60.21
+- vault2: 192.168.60.22
+- vault3: 192.168.60.23
 
 ### Step 2: Deploy Vault with Ansible
 
@@ -73,9 +73,9 @@ After deployment, you can access the Vault Web UI at:
 
 You can SSH directly to the VMs using:
 ```bash
-ssh vagrant@192.168.56.11  # vault1
-ssh vagrant@192.168.56.12  # vault2
-ssh vagrant@192.168.56.13  # vault3
+ssh vagrant@192.168.60.21  # vault1
+ssh vagrant@192.168.60.22  # vault2
+ssh vagrant@192.168.60.23  # vault3
 ```
 
 ## Production Usage
