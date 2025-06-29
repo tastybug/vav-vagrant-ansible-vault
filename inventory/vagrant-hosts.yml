@@ -3,17 +3,17 @@ all:
     vault_cluster:
       hosts:
         vault1:
-          ansible_host: vault1
+          ansible_host: 192.168.60.21
           vault_node_id: node1
           vault_api_addr: "https://vault1:8200"
           vault_cluster_addr: "https://vault1:8201"
         vault2:
-          ansible_host: vault2
+          ansible_host: 192.168.60.22
           vault_node_id: node2
           vault_api_addr: "https://vault2:8200"
           vault_cluster_addr: "https://vault2:8201"
         vault3:
-          ansible_host: vault3
+          ansible_host: 192.168.60.23
           vault_node_id: node3
           vault_api_addr: "https://vault3:8200"
           vault_cluster_addr: "https://vault3:8201"
